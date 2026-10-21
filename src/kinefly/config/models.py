@@ -177,6 +177,7 @@ class RecordingConfig:
 @dataclass
 class GuiConfig:
     state_file: str = "~/kinefly.yaml"
+    background_file: str = "~/kinefly.png"  # Written by "Save BG", loaded at startup.
 
 
 @dataclass

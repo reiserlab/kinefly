@@ -115,17 +115,18 @@ The **head** and **abdomen** use the same hinge + wedge geometry. The **aux** re
 |---|---|
 | **Track H/A/L/R/X** | Enable tracking for head / abdomen / left wing / right wing / aux |
 | **Record** | Start/stop MP4 recording to `~/kinefly_recordings/` |
-| **Save BG** | Capture the current frame as the background for subtraction |
+| **Save BG** | Capture the current frame as the background for subtraction, and save it to `~/kinefly.png` (`gui.background_file`), which is loaded at the next startup |
 | **Exit** | Save state and quit |
 
 ### Toolbar — Display options row
 
 | Control | Action |
 |---|---|
-| **SubtBG H/A/L/R/X** | Subtract the saved background from that body part before tracking. Capture a background first with **Save BG**. |
+| **SubtBG H/A/LR/X** | Subtract the saved background from the head / abdomen / both wings / aux before tracking. Needs a background: use **Save BG** first. |
 | **InvertColor** | Invert pixel intensities before processing. Use when the fly is lighter than the background. |
 | **Windows** | Show per-tracker OpenCV diagnostic windows (useful for debugging tracking quality). |
-| **Symmetric** _(disabled)_ | Not yet implemented. Would mirror the left-wing geometry to the right automatically. See tooltip for implementation notes. |
+| **Stabilize** | Show the area-tracked body parts (usually the head) stabilized, in a diagnostic window when **Windows** is on |
+| **Symmetric** | Keep the handles symmetric about the body axis while dragging: each wing mirrors the other, the head's and abdomen's angle handles mirror each other, and moving the head or abdomen hinge carries the wing hinges along. On by default. |
 
 ### Keyboard / mouse
 
@@ -175,6 +176,7 @@ recording:
 
 gui:
   state_file: ~/kinefly.yaml   # handle positions and checkbox states
+  background_file: ~/kinefly.png  # "Save BG" writes it; loaded at startup
 
 # Uncomment to enable ZeroMQ publishing:
 # zmq:
@@ -384,7 +386,7 @@ rigs/
 
 ## GUI state file
 
-Handle positions and checkbox states are persisted to `~/kinefly.yaml` (configurable via `gui.state_file` in the rig config). The file is written automatically whenever a handle is moved or a checkbox is toggled.
+Handle positions and checkbox states are persisted to `~/kinefly.yaml` (configurable via `gui.state_file` in the rig config). The file is written automatically whenever a handle is moved or a checkbox is toggled. The background image from **Save BG** is kept separately, in `~/kinefly.png` (`gui.background_file`).
 
 ```yaml
 gui:

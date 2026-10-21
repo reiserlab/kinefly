@@ -11,19 +11,27 @@ from kinefly.gui.handle_params import legalize_params, update_params_from_drag
 SHAPE = (480, 640)
 
 
-def _full_params():
+def _full_params(symmetric=False):
     from kinefly.__main__ import _build_fly_params, _default_gui_state
     from kinefly.config.loader import _parse_config
 
-    config = _parse_config(
-        {"tracking": {"left": {"tracker": "edge"}, "right": {"tracker": "edge"}}}
+    params = _build_fly_params(
+        _parse_config({}), _default_gui_state(SHAPE[1], SHAPE[0]), (SHAPE[1], SHAPE[0])
     )
-    return _build_fly_params(config, _default_gui_state(SHAPE[1], SHAPE[0]), (SHAPE[1], SHAPE[0]))
+    params["gui"]["symmetric"] = symmetric
+    return params
 
 
 @pytest.fixture
 def fly():
+    """A fly with the default handle layout, not in symmetric mode."""
     return Fly(params=_full_params())
+
+
+@pytest.fixture
+def fly_sym():
+    """A fly with the default handle layout, in symmetric mode."""
+    return Fly(params=_full_params(symmetric=True))
 
 
 def _drag(fly, tracker, handle, x, y):
@@ -129,6 +137,14 @@ class TestAngleDrag:
         tracker.create_mask(SHAPE)  # A consistent wedge builds a mask.
         assert tracker.mask.xMin is not None
 
+    def test_default_wedges_face_outward(self, fly):
+        """In the default layout, each wedge straddles its bodypart's outward direction."""
+        for part in ("head", "abdomen", "left", "right"):
+            t = getattr(fly, part)
+            g = fly.params["gui"][part]
+            mid = (g["angle_lo"] + g["angle_hi"]) / 2
+            assert np.cos(mid - t.angleBodypart_b) == pytest.approx(1.0), part
+
     def test_drag_within_range_keeps_handle(self, fly):
         g = fly.params["gui"]["left"]
         (lo, hi) = (g["angle_lo"], g["angle_hi"])
@@ -182,3 +198,75 @@ class TestAuxDrag:
         _drag(fly, fly.aux, "center", 100.5, 120.25)
         assert fly.params["gui"]["aux"]["center"] == {"x": 100.5, "y": 120.25}
         np.testing.assert_allclose(fly.aux.ptCenter_i, [100.5, 120.25])
+
+
+def _hinge(fly, part):
+    g = fly.params["gui"][part]["hinge"]
+    return np.array([g["x"], g["y"]])
+
+
+class TestSymmetric:
+    def test_default_is_symmetric(self):
+        from kinefly.__main__ import _default_gui_state
+
+        assert _default_gui_state(640, 480)["gui"]["symmetric"] is True
+
+    def test_default_layout_is_mirror_image(self, fly_sym):
+        g = fly_sym.params["gui"]
+        assert g["right"]["angle_lo"] == pytest.approx(-g["left"]["angle_hi"])
+        assert g["right"]["angle_hi"] == pytest.approx(-g["left"]["angle_lo"])
+
+    def test_wing_hinge_mirrors(self, fly_sym):
+        _drag(fly_sym, fly_sym.left, "hinge", 240.0, 190.0)
+        # The body axis is vertical at x=300, so the mirror image is at x=360.
+        np.testing.assert_allclose(_hinge(fly_sym, "right"), [360.0, 190.0])
+        assert not fly_sym.right.bValidMask
+
+    @pytest.mark.parametrize("handle", ["angle_lo", "angle_hi"])
+    def test_wing_angle_mirrors(self, fly_sym, handle):
+        g = fly_sym.params["gui"]
+        target = (g["left"]["angle_lo"] + g["left"]["angle_hi"]) / 2 + (
+            -0.3 if handle == "angle_lo" else 0.3
+        )
+        _drag(fly_sym, fly_sym.left, handle, *_point_at(fly_sym.left, target, 60.0))
+        assert g["left"][handle] == pytest.approx(target)
+        assert g["right"]["angle_lo"] == pytest.approx(-g["left"]["angle_hi"])
+        assert g["right"]["angle_hi"] == pytest.approx(-g["left"]["angle_lo"])
+
+    @pytest.mark.parametrize("handle", ["radius_inner", "radius_outer"])
+    def test_wing_radius_mirrors(self, fly_sym, handle):
+        g = fly_sym.params["gui"]
+        angle = (g["right"]["angle_lo"] + g["right"]["angle_hi"]) / 2
+        r = 60.0 if handle == "radius_inner" else 90.0
+        _drag(fly_sym, fly_sym.right, handle, *_point_at(fly_sym.right, angle, r))
+        assert g["right"][handle] == pytest.approx(r)
+        assert g["left"]["radius_inner"] == g["right"]["radius_inner"]
+        assert g["left"]["radius_outer"] == g["right"]["radius_outer"]
+
+    @pytest.mark.parametrize("part", ["head", "abdomen"])
+    def test_head_abdomen_angles_mirror(self, fly_sym, part):
+        """Dragging one head/abdomen angle handle moves the other to its mirror image."""
+        tracker = getattr(fly_sym, part)
+        g = fly_sym.params["gui"][part]
+        target = tracker.angleBodypart_b + 0.4
+        _drag(fly_sym, tracker, "angle_hi", *_point_at(tracker, target, 60.0))
+        assert np.cos(g["angle_hi"] - target) == pytest.approx(1.0)
+        assert np.cos(g["angle_lo"] + target) == pytest.approx(1.0)
+        assert g["angle_lo"] < g["angle_hi"]
+
+    def test_head_hinge_carries_wings(self, fly_sym):
+        """Moving the head hinge rotates and moves the wing hinges with the body."""
+        center = (_hinge(fly_sym, "head") + _hinge(fly_sym, "abdomen")) / 2
+        (left, right) = (_hinge(fly_sym, "left") - center, _hinge(fly_sym, "right") - center)
+        # Rotate the body by 90 degrees about the abdomen hinge:  the head goes to the right.
+        abdomen = _hinge(fly_sym, "abdomen")
+        _drag(fly_sym, fly_sym.head, "hinge", abdomen[0] + 100.0, abdomen[1])
+        center = (_hinge(fly_sym, "head") + _hinge(fly_sym, "abdomen")) / 2
+        rot = np.array([[0.0, -1.0], [1.0, 0.0]])  # +90 degrees in image coordinates.
+        np.testing.assert_allclose(_hinge(fly_sym, "left"), center + rot @ left, atol=1e-9)
+        np.testing.assert_allclose(_hinge(fly_sym, "right"), center + rot @ right, atol=1e-9)
+
+    def test_not_symmetric_leaves_other_wing(self, fly):
+        before = _hinge(fly, "right")
+        _drag(fly, fly.left, "hinge", 240.0, 190.0)
+        np.testing.assert_allclose(_hinge(fly, "right"), before)

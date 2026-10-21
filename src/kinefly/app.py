@@ -66,6 +66,8 @@ class KineflyApp:
         plugins: list,
         recorder=None,
         state_file: str = "~/kinefly.yaml",
+        background_file: str = "~/kinefly.png",
+        have_background: bool = False,
     ) -> None:
         self._config = config
         self._camera = camera
@@ -74,6 +76,8 @@ class KineflyApp:
         self._plugins = plugins
         self._recorder = recorder
         self._state_file = Path(state_file).expanduser()
+        self._background_file = Path(background_file).expanduser()
+        self._have_background = have_background  # The fly has a background image.
         self._last_frame: np.ndarray | None = None
 
         self._qapp = QApplication.instance() or QApplication([])
@@ -93,6 +97,8 @@ class KineflyApp:
         self._window.subtract_bg_toggled.connect(self._on_subtract_bg_toggled)
         self._window.invert_color_toggled.connect(self._on_invert_color_toggled)
         self._window.windows_toggled.connect(self._on_windows_toggled)
+        self._window.stabilize_toggled.connect(self._on_stabilize_toggled)
+        self._window.symmetric_toggled.connect(self._on_symmetric_toggled)
         self._window.record_toggled.connect(self._on_record_toggled)
         self._window.save_background_clicked.connect(self._on_save_background)
         self._window.exit_clicked.connect(self._on_exit)
@@ -101,11 +107,11 @@ class KineflyApp:
         gui = fly.params.get("gui", {})
         for part in ("head", "abdomen", "left", "right", "aux"):
             self._window.set_track_state(part, gui.get(part, {}).get("track", False))
-            self._window.set_subtract_bg_state(
-                part, gui.get(part, {}).get("subtract_bg", False)
-            )
+            self._window.set_subtract_bg_state(part, gui.get(part, {}).get("subtract_bg", False))
         self._window.set_invert_color_state(bool(getattr(fly, "bInvertColor", False)))
         self._window.set_windows_state(bool(gui.get("windows", False)))
+        self._window.set_stabilize_state(bool(gui.get("head", {}).get("stabilize", False)))
+        self._window.set_symmetric_state(bool(gui.get("symmetric", False)))
 
         # Frame timer
         self._timer = QTimer()
@@ -223,20 +229,19 @@ class KineflyApp:
         self._save_gui_state()
 
     def _on_subtract_bg_toggled(self, part: str, enabled: bool) -> None:
+        """``part`` is a bodypart, or ``"lr"`` for both wings."""
         if not self._fly.params:
             return
-        _set_nested(self._fly.params, ["gui", part, "subtract_bg"], enabled)
-        # Invalidate the tracker mask so it rebuilds with/without BG subtraction.
-        for tracker in (
-            self._fly.head,
-            self._fly.abdomen,
-            self._fly.left,
-            self._fly.right,
-            self._fly.aux,
-        ):
-            if getattr(tracker, "name", None) == part:
-                tracker.bValidMask = False
-                break
+        if enabled and not self._have_background:
+            # As in the original:  there is nothing to subtract yet.
+            logger.warning("No background image.  Use 'Save BG' first to subtract it.")
+            self._window.set_subtract_bg_state(part, False)
+            return
+        parts = ("left", "right") if part == "lr" else (part,)
+        for p in parts:
+            _set_nested(self._fly.params, ["gui", p, "subtract_bg"], enabled)
+            # Invalidate the tracker mask so it rebuilds with/without BG subtraction.
+            getattr(self._fly, p).bValidMask = False
         self._save_gui_state()
 
     def _on_invert_color_toggled(self, enabled: bool) -> None:
@@ -250,6 +255,20 @@ class KineflyApp:
         if not self._fly.params:
             return
         _set_nested(self._fly.params, ["gui", "windows"], enabled)
+        self._save_gui_state()
+
+    def _on_stabilize_toggled(self, enabled: bool) -> None:
+        if not self._fly.params:
+            return
+        for part in ("head", "abdomen", "left", "right"):
+            _set_nested(self._fly.params, ["gui", part, "stabilize"], enabled)
+        self._fly.set_params(self._fly.params)  # Shows or hides the stabilized windows.
+        self._save_gui_state()
+
+    def _on_symmetric_toggled(self, enabled: bool) -> None:
+        if not self._fly.params:
+            return
+        _set_nested(self._fly.params, ["gui", "symmetric"], enabled)
         self._save_gui_state()
 
     def _on_record_toggled(self, recording: bool) -> None:
@@ -277,9 +296,18 @@ class KineflyApp:
                 self._recorder = None
 
     def _on_save_background(self) -> None:
-        if self._last_frame is not None:
-            self._fly.set_background(self._last_frame)
-            logger.info("Background saved.")
+        """Use the current frame as the background, and save it for the next session."""
+        if self._last_frame is None:
+            return
+        self._fly.set_background(self._last_frame)
+        self._have_background = True
+        try:
+            self._background_file.parent.mkdir(parents=True, exist_ok=True)
+            if not cv2.imwrite(str(self._background_file), self._last_frame):
+                raise OSError("cv2.imwrite failed")
+            logger.info("Background saved to %s", self._background_file)
+        except Exception:
+            logger.exception("Failed to save the background image to %s", self._background_file)
 
     def _on_exit(self) -> None:
         self._save_gui_state()
@@ -299,8 +327,16 @@ class KineflyApp:
         for part in ("head", "abdomen", "left", "right"):
             part_gui = gui.get(part, {})
             entry: dict = {}
-            for key in ("hinge", "angle_hi", "angle_lo", "radius_inner", "radius_outer",
-                        "track", "subtract_bg", "stabilize"):
+            for key in (
+                "hinge",
+                "angle_hi",
+                "angle_lo",
+                "radius_inner",
+                "radius_outer",
+                "track",
+                "subtract_bg",
+                "stabilize",
+            ):
                 if key in part_gui:
                     entry[key] = part_gui[key]
             entry.setdefault("track", False)
@@ -318,14 +354,13 @@ class KineflyApp:
         # Axis tracker: two points
         axis_gui = gui.get("axis", {})
         state["gui"]["axis"] = {
-            key: axis_gui[key]
-            for key in ("pt1", "pt2", "track")
-            if key in axis_gui
+            key: axis_gui[key] for key in ("pt1", "pt2", "track") if key in axis_gui
         }
         state["gui"]["axis"].setdefault("track", False)
 
         # Global display flags
         state["gui"]["windows"] = bool(gui.get("windows", False))
+        state["gui"]["symmetric"] = bool(gui.get("symmetric", False))
         state["gui"]["invert_color"] = bool(getattr(self._fly, "bInvertColor", False))
 
         try:

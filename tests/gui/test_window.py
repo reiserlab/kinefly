@@ -140,7 +140,18 @@ class TestMainWindow:
         win.subtract_bg_toggled.connect(lambda p, e: received.append((p, e)))
         win.set_subtract_bg_state("left", True)
         assert received == [], "set_subtract_bg_state must not emit subtract_bg_toggled"
-        assert win._subtract_bg_checks["left"].isChecked()
+        assert win._subtract_bg_checks["lr"].isChecked()  # One checkbox for both wings.
+        win.close()
+
+    def test_subtract_bg_wings_share_a_checkbox(self, qapp):
+        from kinefly.gui.window import MainWindow
+
+        win = MainWindow()
+        assert set(win._subtract_bg_checks) == {"head", "abdomen", "lr", "aux"}
+        received = []
+        win.subtract_bg_toggled.connect(lambda p, e: received.append((p, e)))
+        win._subtract_bg_checks["lr"].setChecked(True)
+        assert received == [("lr", True)]
         win.close()
 
     def test_set_invert_color_no_signal(self, qapp):
@@ -165,4 +176,20 @@ class TestMainWindow:
         win.set_windows_state(True)
         assert received == [], "set_windows_state must not emit windows_toggled"
         assert win._cb_windows.isChecked()
+        win.close()
+
+    @pytest.mark.parametrize("name", ["stabilize", "symmetric"])
+    def test_stabilize_symmetric_checkboxes(self, qapp, name):
+        """The checkboxes are enabled, emit when clicked, and can be set silently."""
+        from kinefly.gui.window import MainWindow
+
+        win = MainWindow()
+        cb = getattr(win, f"_cb_{name}")
+        assert cb.isEnabled()
+        received = []
+        getattr(win, f"{name}_toggled").connect(lambda e: received.append(e))
+        getattr(win, f"set_{name}_state")(True)
+        assert received == [] and cb.isChecked()
+        cb.setChecked(False)
+        assert received == [False]
         win.close()

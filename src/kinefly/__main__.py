@@ -115,75 +115,75 @@ def _load_gui_state(state_file: str) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def _default_gui_state(width: int, height: int) -> dict:
-    """Return a complete gui_state with sensible default handle positions.
+def _load_background(path: str, fly, resolution: tuple[int, int]) -> bool:
+    """Give ``fly`` the background image saved at ``path``, if there is one that fits.
 
-    Positions are centred on the image with body parts arranged in a cross:
-    head above centre, abdomen below, left/right wings to the sides.
-    All tracking is disabled by default — the user enables it after placing
-    the handles.
+    Returns whether a background was loaded.
     """
-    cx, cy = width // 2, height // 2
-    r = min(width, height) // 6  # rough spacing from centre
-    ro = min(width, height) // 8  # outer radius of tracking wedge
-    ri = ro // 4  # inner radius
+    import cv2
+
+    path = Path(path).expanduser()
+    img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE) if path.exists() else None
+    if img is None:
+        return False
+    (width, height) = resolution
+    if img.shape != (height, width):
+        logger.warning(
+            "Ignoring background image %s: it is %dx%d, but the camera is %dx%d.",
+            path,
+            img.shape[1],
+            img.shape[0],
+            width,
+            height,
+        )
+        return False
+    fly.set_background(img)
+    logger.info("Loaded background image %s", path)
+    return True
+
+
+def _default_gui_state(width: int, height: int) -> dict:
+    """Return a complete gui_state with the original Kinefly's default handle layout.
+
+    The original's layout is for a 640x480 image; it is scaled to ``width``.  The fly
+    faces up:  head above abdomen, wings to either side, wedges pointing outward.
+    All tracking is disabled by default — the user enables it after placing the handles.
+    """
+    k = width / 640.0
+
+    def motion(x, y, radius_outer, radius_inner, angle_hi, angle_lo):
+        return {
+            "hinge": {"x": x * k, "y": y * k},
+            "angle_hi": angle_hi,
+            "angle_lo": angle_lo,
+            "radius_outer": radius_outer * k,
+            "radius_inner": radius_inner * k,
+            "track": False,
+            "subtract_bg": False,
+            "stabilize": False,
+        }
 
     return {
         "gui": {
-            "head": {
-                "hinge": {"x": cx, "y": cy - r},
-                "angle_hi": 1.0,
-                "angle_lo": -1.0,
-                "radius_outer": ro,
-                "radius_inner": ri,
-                "track": False,
-                "subtract_bg": False,
-                "stabilize": False,
-            },
-            "abdomen": {
-                "hinge": {"x": cx, "y": cy + r},
-                "angle_hi": 1.0,
-                "angle_lo": -1.0,
-                "radius_outer": ro,
-                "radius_inner": ri,
-                "track": False,
-                "subtract_bg": False,
-                "stabilize": False,
-            },
-            "left": {
-                "hinge": {"x": cx - r, "y": cy},
-                "angle_hi": 1.5,
-                "angle_lo": 0.1,
-                "radius_outer": ro,
-                "radius_inner": ri,
-                "track": False,
-                "subtract_bg": False,
-                "stabilize": False,
-            },
-            "right": {
-                "hinge": {"x": cx + r, "y": cy},
-                "angle_hi": -0.1,
-                "angle_lo": -1.5,
-                "radius_outer": ro,
-                "radius_inner": ri,
-                "track": False,
-                "subtract_bg": False,
-                "stabilize": False,
-            },
+            "head": motion(300, 150, 80, 50, 0.7854, -0.7854),
+            "abdomen": motion(300, 250, 120, 100, 3.927, 2.3562),
+            "left": motion(250, 200, 80, 50, -0.7854, -2.3562),
+            "right": motion(350, 200, 80, 50, 2.3562, 0.7854),
             "aux": {
-                "center": {"x": cx, "y": cy},
-                "radius1": ro // 2,
-                "radius2": ri,
+                "center": {"x": 350 * k, "y": 150 * k},
+                "radius1": 30 * k,
+                "radius2": 20 * k,
                 "angle": 0.0,
                 "track": False,
                 "subtract_bg": False,
             },
             "axis": {
-                "pt1": {"x": cx, "y": cy - r},
-                "pt2": {"x": cx, "y": cy + r},
+                "pt1": {"x": 310 * k, "y": 150 * k},
+                "pt2": {"x": 310 * k, "y": 250 * k},
                 "track": False,
             },
             "windows": False,
+            "symmetric": True,  # Keep the wings mirror images while dragging handles.
         }
     }
 
@@ -209,6 +209,7 @@ def _build_fly_params(config, gui_state: dict, img_size: tuple[int, int] = (640,
         defaults = _default_gui_state(*img_size)
         for part, default_entry in defaults["gui"].items():
             if not isinstance(default_entry, dict):
+                gui_state.setdefault("gui", {}).setdefault(part, default_entry)
                 continue
             saved = gui_state.setdefault("gui", {}).setdefault(part, {})
             for key, val in default_entry.items():
@@ -315,6 +316,7 @@ def main() -> int:
     from kinefly.fly import Fly
 
     fly = Fly(params=fly_params, event_bus=bus)
+    have_background = _load_background(config.gui.background_file, fly, camera.resolution)
 
     # Optional recorder
     recorder = None
@@ -350,6 +352,8 @@ def main() -> int:
             plugins=plugins,
             recorder=recorder,
             state_file=config.gui.state_file,
+            background_file=config.gui.background_file,
+            have_background=have_background,
         )
         return app.run()
 

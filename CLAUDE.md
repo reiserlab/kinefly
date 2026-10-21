@@ -71,7 +71,7 @@ Each bodypart: `angles` (rad), `radii` (px), `gradients`, `freq` (Hz), `intensit
 
 Rig configs are YAML files under `rigs/`. See `rigs/example/config.yaml` for the full schema.
 
-GUI state (hinge positions, checkbox states) auto-saves to `~/kinefly.yaml`.
+GUI state (hinge positions, checkbox states) auto-saves to `~/kinefly.yaml`; the Save BG background image goes to `~/kinefly.png`.
 
 ### Tools (`tools/`)
 

@@ -25,11 +25,17 @@ class MainWindow(QMainWindow):
         Emitted when a Track checkbox is toggled. ``part`` is one of
         ``"head"``, ``"abdomen"``, ``"left"``, ``"right"``, ``"aux"``.
     subtract_bg_toggled(part, enabled)
-        Emitted when a SubtBG checkbox is toggled for a body part.
+        Emitted when a SubtBG checkbox is toggled.  ``part`` is ``"head"``,
+        ``"abdomen"``, ``"aux"``, or ``"lr"`` for both wings (one checkbox, as in
+        the original).
     invert_color_toggled(enabled)
         Emitted when the InvertColor checkbox is toggled.
     windows_toggled(enabled)
         Emitted when the Windows checkbox is toggled.
+    stabilize_toggled(enabled)
+        Emitted when the Stabilize checkbox is toggled.
+    symmetric_toggled(enabled)
+        Emitted when the Symmetric checkbox is toggled.
     record_toggled(recording)
         Emitted when the Record button is toggled.
     save_background_clicked
@@ -46,11 +52,15 @@ class MainWindow(QMainWindow):
     subtract_bg_toggled = Signal(str, bool)
     invert_color_toggled = Signal(bool)
     windows_toggled = Signal(bool)
+    stabilize_toggled = Signal(bool)
+    symmetric_toggled = Signal(bool)
     record_toggled = Signal(bool)
     save_background_clicked = Signal()
     exit_clicked = Signal()
 
     _BODY_PARTS = ("head", "abdomen", "left", "right", "aux")
+    # Background subtraction has one checkbox for both wings, as in the original.
+    _SUBTRACT_BG_GROUPS = {"head": "H", "abdomen": "A", "lr": "LR", "aux": "X"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,16 +113,15 @@ class MainWindow(QMainWindow):
 
         # SubtractBG checkboxes — one per body part
         self._subtract_bg_checks: dict[str, QCheckBox] = {}
-        for part in self._BODY_PARTS:
-            cb = QCheckBox(f"SubtBG {part[0].upper()}")
+        for part, label in self._SUBTRACT_BG_GROUPS.items():
+            cb = QCheckBox(f"SubtBG {label}")
             cb.setChecked(False)
+            region = "left and right wing" if part == "lr" else part
             cb.setToolTip(
-                f"Subtract background from the {part} region before tracking.\n"
+                f"Subtract background from the {region} region before tracking.\n"
                 "Use 'Save BG' first to capture a clean background frame."
             )
-            cb.toggled.connect(
-                lambda checked, p=part: self.subtract_bg_toggled.emit(p, checked)
-            )
+            cb.toggled.connect(lambda checked, p=part: self.subtract_bg_toggled.emit(p, checked))
             toolbar2.addWidget(cb)
             self._subtract_bg_checks[part] = cb
 
@@ -142,20 +151,28 @@ class MainWindow(QMainWindow):
 
         toolbar2.addSeparator()
 
-        # Symmetric — disabled placeholder (feature not yet implemented)
-        cb_symmetric = QCheckBox("Symmetric")
-        cb_symmetric.setEnabled(False)
-        cb_symmetric.setToolTip(
-            "NOT YET IMPLEMENTED.\n\n"
-            "Symmetric mode mirrors the left-wing tracker geometry to the right side\n"
-            "automatically, so both wings share the same wedge shape. Implementing this\n"
-            "requires:\n"
-            "  1. A bilateral-symmetry axis derived from the fly's body axis.\n"
-            "  2. Logic in Fly.update() to copy left-tracker handle positions to right,\n"
-            "     reflecting hinge, angle_hi/lo, and radius_inner across the axis.\n"
-            "  3. Disabling the right-side handles in the GUI when active.\n"
+        # Stabilize — show each area-tracked bodypart stabilized
+        self._cb_stabilize = QCheckBox("Stabilize")
+        self._cb_stabilize.setChecked(False)
+        self._cb_stabilize.setToolTip(
+            "Show the area-tracked bodyparts (usually the head) stabilized:\n"
+            "the camera image rotated to cancel the tracked motion.\n"
+            "Shown in a diagnostic window when 'Windows' is on."
         )
-        toolbar2.addWidget(cb_symmetric)
+        self._cb_stabilize.toggled.connect(self.stabilize_toggled)
+        toolbar2.addWidget(self._cb_stabilize)
+
+        # Symmetric — keep the handles mirror-symmetric about the body axis
+        self._cb_symmetric = QCheckBox("Symmetric")
+        self._cb_symmetric.setChecked(False)
+        self._cb_symmetric.setToolTip(
+            "Keep the handles symmetric about the body axis while dragging:\n"
+            "each wing's handles mirror the other's, the head's and abdomen's\n"
+            "angle handles mirror each other, and moving the head or abdomen\n"
+            "hinge carries the wing hinges along."
+        )
+        self._cb_symmetric.toggled.connect(self.symmetric_toggled)
+        toolbar2.addWidget(self._cb_symmetric)
 
         # ── Status bar ───────────────────────────────────────────────────
         self._status_bar = QStatusBar()
@@ -188,8 +205,11 @@ class MainWindow(QMainWindow):
             cb.blockSignals(False)
 
     def set_subtract_bg_state(self, part: str, enabled: bool) -> None:
-        """Programmatically set a SubtBG checkbox without triggering the signal."""
-        cb = self._subtract_bg_checks.get(part)
+        """Programmatically set a SubtBG checkbox without triggering the signal.
+
+        ``part`` may be ``"left"``, ``"right"`` or ``"lr"`` for the wings' checkbox.
+        """
+        cb = self._subtract_bg_checks.get("lr" if part in ("left", "right") else part)
         if cb is not None:
             cb.blockSignals(True)
             cb.setChecked(enabled)
@@ -206,6 +226,18 @@ class MainWindow(QMainWindow):
         self._cb_windows.blockSignals(True)
         self._cb_windows.setChecked(enabled)
         self._cb_windows.blockSignals(False)
+
+    def set_stabilize_state(self, enabled: bool) -> None:
+        """Programmatically set the Stabilize checkbox without triggering the signal."""
+        self._cb_stabilize.blockSignals(True)
+        self._cb_stabilize.setChecked(enabled)
+        self._cb_stabilize.blockSignals(False)
+
+    def set_symmetric_state(self, enabled: bool) -> None:
+        """Programmatically set the Symmetric checkbox without triggering the signal."""
+        self._cb_symmetric.blockSignals(True)
+        self._cb_symmetric.setChecked(enabled)
+        self._cb_symmetric.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Private slots

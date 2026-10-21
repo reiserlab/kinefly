@@ -1,13 +1,19 @@
 """Turn handle drags into GUI params, as the original Kinefly did.
 
 Ported from nodes/kinefly.py (update_params_from_mouse() and legalizeParams()).
-Kept free of Qt so the param updates can be unit tested.  Symmetric mode is not
-ported (it is gone from the GUI).
+Kept free of Qt so the param updates can be unit tested.
+
+In symmetric mode (``params['gui']['symmetric']``), dragging one wing's handles mirrors
+them onto the other wing across the body axis, dragging one head or abdomen angle
+handle mirrors it onto the other, and moving the head or abdomen hinge carries the
+wing hinges along with the body.
 """
 
 from __future__ import annotations
 
 import numpy as np
+
+from kinefly.core import imaging
 
 MOTION_PARTS = ("head", "abdomen", "left", "right")
 
@@ -17,6 +23,8 @@ MIN_RADIUS_GAP_DRAG = 2.0
 
 # Limits applied when params are loaded: radius_inner >= 5, radius_outer >= radius_inner + 5.
 MIN_RADIUS_LEGAL = 5.0
+
+_OTHER_WING = {"left": "right", "right": "left"}
 
 
 def _wrap(angle: float) -> float:
@@ -64,28 +72,60 @@ def update_params_from_drag(fly, tracker, handle_name: str, x: float, y: float, 
     """
     gui = fly.params["gui"]
     part = tracker.name
+    symmetric = bool(gui.get("symmetric", False))
+    wing = _OTHER_WING.get(part)  # The other wing, if this is a wing.
     ptMouse = np.array([float(x), float(y)])
     if shape is not None:
         ptMouse = ptMouse.clip((0, 0), (shape[1], shape[0]))
 
     if handle_name == "hinge":
-        gui[part]["hinge"]["x"] = float(ptMouse[0])
-        gui[part]["hinge"]["y"] = float(ptMouse[1])
         if part in ("head", "abdomen"):
+            if symmetric:
+                # The wing hinges, in body coordinates, before the move.
+                (center, angleBody) = _body_frame(gui)
+                wings = {}
+                for w in ("left", "right"):
+                    pt = _hinge(gui, w) - center
+                    wings[w] = (np.linalg.norm(pt), np.arctan2(pt[1], pt[0]) - angleBody)
+
+            gui[part]["hinge"]["x"] = float(ptMouse[0])
+            gui[part]["hinge"]["y"] = float(ptMouse[1])
+
+            if symmetric:
+                # Carry the wing hinges along with the body.
+                (center, angleBody) = _body_frame(gui)
+                for w, (r, a) in wings.items():
+                    pt = center + r * np.array([np.cos(a + angleBody), np.sin(a + angleBody)])
+                    gui[w]["hinge"]["x"] = float(pt[0])
+                    gui[w]["hinge"]["y"] = float(pt[1])
+
             # The body axis moved:  every wedge is measured from it.
             for t in (fly.axis, fly.head, fly.abdomen, fly.left, fly.right):
                 t.bValidMask = False
         else:
+            gui[part]["hinge"]["x"] = float(ptMouse[0])
+            gui[part]["hinge"]["y"] = float(ptMouse[1])
             tracker.bValidMask = False
+            if symmetric and wing:
+                pt = imaging.get_reflection_across_axis(
+                    ptMouse, _hinge(gui, "abdomen"), _hinge(gui, "head")
+                )
+                gui[wing]["hinge"]["x"] = float(pt[0])
+                gui[wing]["hinge"]["y"] = float(pt[1])
+                getattr(fly, wing).bValidMask = False
 
     elif handle_name in ("angle_hi", "angle_lo"):
         other = "angle_lo" if (handle_name == "angle_hi") else "angle_hi"
         pt = ptMouse - tracker.ptHinge_i
         angle_b = float(tracker.transform_angle_b_from_i(np.arctan2(pt[1], pt[0])))
-        if handle_name == "angle_lo":
-            (angle_lo_b, angle_hi_b) = (angle_b, gui[part][other])
+        if symmetric and (part in ("head", "abdomen")):
+            angle_other_b = -angle_b  # Symmetric about the body axis.
         else:
-            (angle_lo_b, angle_hi_b) = (gui[part][other], angle_b)
+            angle_other_b = gui[part][other]
+        if handle_name == "angle_lo":
+            (angle_lo_b, angle_hi_b) = (angle_b, angle_other_b)
+        else:
+            (angle_lo_b, angle_hi_b) = (angle_other_b, angle_b)
 
         # Order the angles relative to the bodypart's outward direction.
         angle_lo_b = _wrap(angle_lo_b - tracker.angleBodypart_b)
@@ -99,16 +139,22 @@ def update_params_from_drag(fly, tracker, handle_name: str, x: float, y: float, 
         gui[part]["angle_lo"] = float(lo)
         gui[part]["angle_hi"] = float(hi)
         tracker.bValidMask = False
+        if symmetric and wing:
+            _mirror_wing(fly, gui, part, wing)
 
     elif handle_name == "radius_inner":
         r = np.linalg.norm(ptMouse - tracker.ptHinge_i)
         gui[part]["radius_inner"] = float(min(r, gui[part]["radius_outer"] - MIN_RADIUS_GAP_DRAG))
         tracker.bValidMask = False
+        if symmetric and wing:
+            _mirror_wing(fly, gui, part, wing)
 
     elif handle_name == "radius_outer":
         r = np.linalg.norm(ptMouse - tracker.ptHinge_i)
         gui[part]["radius_outer"] = float(max(r, gui[part]["radius_inner"] + MIN_RADIUS_GAP_DRAG))
         tracker.bValidMask = False
+        if symmetric and wing:
+            _mirror_wing(fly, gui, part, wing)
 
     elif handle_name in ("center", "pt1", "pt2"):
         gui[part][handle_name]["x"] = float(ptMouse[0])
@@ -128,3 +174,23 @@ def update_params_from_drag(fly, tracker, handle_name: str, x: float, y: float, 
         tracker.bValidMask = False
 
     return handle_name
+
+
+def _hinge(gui: dict, part: str) -> np.ndarray:
+    return np.array([gui[part]["hinge"]["x"], gui[part]["hinge"]["y"]], dtype=float)
+
+
+def _body_frame(gui: dict) -> tuple[np.ndarray, float]:
+    """The body center (midway between head and abdomen hinges) and the body axis angle."""
+    (ptHead, ptAbdomen) = (_hinge(gui, "head"), _hinge(gui, "abdomen"))
+    ptBody = ptHead - ptAbdomen
+    return ((ptHead + ptAbdomen) / 2, float(np.arctan2(ptBody[1], ptBody[0])))
+
+
+def _mirror_wing(fly, gui: dict, part: str, wing: str) -> None:
+    """Give ``wing`` the mirror image of ``part``'s wedge:  negated angles, same radii."""
+    gui[wing]["angle_lo"] = -gui[part]["angle_hi"]
+    gui[wing]["angle_hi"] = -gui[part]["angle_lo"]
+    gui[wing]["radius_outer"] = gui[part]["radius_outer"]
+    gui[wing]["radius_inner"] = gui[part]["radius_inner"]
+    getattr(fly, wing).bValidMask = False

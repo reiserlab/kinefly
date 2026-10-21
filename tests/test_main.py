@@ -80,3 +80,25 @@ def test_python_m_kinefly_version():
         cwd=Path(__file__).parent.parent,
     )
     assert result.returncode == 0
+
+
+def test_load_background(tmp_path):
+    """A saved background is loaded if it fits the camera, and ignored if not."""
+    import cv2
+    import numpy as np
+
+    from kinefly.__main__ import _load_background
+    from kinefly.fly import Fly
+
+    path = tmp_path / "kinefly.png"
+    img = np.full((48, 64), 77, dtype=np.uint8)
+    cv2.imwrite(str(path), img)
+
+    fly = Fly(params={})
+    loaded = []
+    fly.set_background = loaded.append
+    assert _load_background(str(path), fly, (64, 48))
+    np.testing.assert_array_equal(loaded[0], img)
+    assert not _load_background(str(path), fly, (640, 480))
+    assert not _load_background(str(tmp_path / "missing.png"), fly, (64, 48))
+    assert len(loaded) == 1

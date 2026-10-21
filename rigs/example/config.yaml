@@ -51,6 +51,7 @@ recording:
 
 gui:
   state_file: ~/kinefly.yaml
+  background_file: ~/kinefly.png  # "Save BG" writes it; loaded at startup
 
 # Uncomment to enable ZeroMQ publishing:
 # zmq:

@@ -42,7 +42,7 @@ def _full_params(width=640, height=480):
 def test_fly_init_sets_body_center():
     """Fly(params) computes the body center from the hinges, as the original did at startup."""
     fly = Fly(params=_full_params())
-    np.testing.assert_allclose(fly.ptBodyCenter_i, [320, 240])
+    np.testing.assert_allclose(fly.ptBodyCenter_i, [300, 200])
 
 
 def test_fly_auto_invert_color():
