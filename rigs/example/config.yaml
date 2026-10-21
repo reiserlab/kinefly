@@ -21,7 +21,7 @@ tracking:
     saturation_correction: false
 
   abdomen:
-    tracker: area
+    tracker: tip
     autozero: true
     threshold: 0.0
     feathering: 0.25
@@ -29,12 +29,16 @@ tracking:
 
   left:
     tracker: edge
+    autozero: true
     threshold: 0.01
+    feathering: 0.25
     saturation_correction: false
 
   right:
     tracker: edge
+    autozero: true
     threshold: 0.01
+    feathering: 0.25
     saturation_correction: false
 
   aux:

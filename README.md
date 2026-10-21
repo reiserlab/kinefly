@@ -181,6 +181,8 @@ gui:
 #   address: tcp://*:5555
 ```
 
+A bodypart section only needs the keys that differ from that bodypart's defaults, which are the original Kinefly's: head `area` with feathering 0.0; abdomen `tip`, left and right `edge`, each with feathering 0.25. All default to `autozero: true`, `threshold: 0.0` and `saturation_correction: false`.
+
 ### Migrate a legacy ROS rig
 
 ```bash
@@ -246,9 +248,9 @@ Each `BodyPartState`:
 
 | Tracker | Key | Typical use |
 |---|---|---|
-| `AreaTracker` | `area` | Head, abdomen — image-registration rotation in polar coordinates |
-| `EdgeTrackerByIntensityProfile` | `edge` | Wings — radial intensity gradient edges |
-| `TipTracker` | `tip` | Wing tip — farthest point from hinge |
+| `AreaTracker` | `area` | Head (default) — image-registration rotation in polar coordinates |
+| `EdgeTrackerByIntensityProfile` | `edge` | Wings (default) — radial intensity gradient edges |
+| `TipTracker` | `tip` | Abdomen (default) — farthest point from hinge |
 | `IntensityTracker` | `intensity` | Aux region, wingbeat frequency via FFT |
 | `AxisTracker` | `axis` | Body axis — two-point line |
 

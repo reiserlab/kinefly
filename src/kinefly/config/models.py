@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Per-bodypart defaults, as in the original Kinefly (nodes/kinefly.py).  A rig config's
+# bodypart section only needs the keys that differ from these.
+BODY_PART_DEFAULTS: dict[str, dict] = {
+    "head": {"tracker": "area", "feathering": 0.0},
+    "abdomen": {"tracker": "tip", "feathering": 0.25},
+    "left": {"tracker": "edge", "feathering": 0.25},
+    "right": {"tracker": "edge", "feathering": 0.25},
+}
 
-def _default_body_part_edge() -> BodyPartConfig:
-    """Return default edge tracker config."""
-    return BodyPartConfig(tracker="edge")
+
+def default_body_part(name: str) -> BodyPartConfig:
+    """Return the default config for bodypart ``name``."""
+    return BodyPartConfig(**BODY_PART_DEFAULTS[name])
 
 
 def _default_phidgets_channels() -> list[PhidgetsChannelConfig]:
@@ -152,10 +161,10 @@ class TrackingConfig:
     n_edges_max: int = 1
     rc_background: float = 1000.0
     use_gui: bool = True
-    head: BodyPartConfig = field(default_factory=BodyPartConfig)
-    abdomen: BodyPartConfig = field(default_factory=BodyPartConfig)
-    left: BodyPartConfig = field(default_factory=_default_body_part_edge)
-    right: BodyPartConfig = field(default_factory=_default_body_part_edge)
+    head: BodyPartConfig = field(default_factory=lambda: default_body_part("head"))
+    abdomen: BodyPartConfig = field(default_factory=lambda: default_body_part("abdomen"))
+    left: BodyPartConfig = field(default_factory=lambda: default_body_part("left"))
+    right: BodyPartConfig = field(default_factory=lambda: default_body_part("right"))
     aux: AuxConfig = field(default_factory=AuxConfig)
 
 

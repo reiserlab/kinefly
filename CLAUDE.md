@@ -61,9 +61,9 @@ Each bodypart: `angles` (rad), `radii` (px), `gradients`, `freq` (Hz), `intensit
 
 ### Tracker classes
 
-- **`AreaTracker`** — Default for head/abdomen. Image registration in polar coordinates.
+- **`AreaTracker`** — Default for the head. Image registration in polar coordinates.
 - **`EdgeTrackerByIntensityProfile`** — Default for wings. Finds radial edges by intensity gradient.
-- **`TipTracker`** — Finds the farthest point of a bodypart from its rotation center.
+- **`TipTracker`** — Default for the abdomen. Finds the farthest point of a bodypart from its rotation center.
 - **`IntensityTracker`** — Monitors pixel intensity; aux region and wingbeat frequency.
 - **`AxisTracker`** — Tracks the body axis.
 

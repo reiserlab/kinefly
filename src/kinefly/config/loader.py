@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from kinefly.config.models import (
+    BODY_PART_DEFAULTS,
     AuxConfig,
     BodyPartConfig,
     CameraConfig,
@@ -67,10 +68,11 @@ def _parse_camera(raw: dict[str, Any]) -> CameraConfig:
 
 
 def _parse_tracking(raw: dict[str, Any]) -> TrackingConfig:
-    head = _parse_dataclass(raw.get("head", {}), BodyPartConfig)
-    abdomen = _parse_dataclass(raw.get("abdomen", {}), BodyPartConfig)
-    left = _parse_dataclass(raw.get("left", {"tracker": "edge"}), BodyPartConfig)
-    right = _parse_dataclass(raw.get("right", {"tracker": "edge"}), BodyPartConfig)
+    # Keys a bodypart section leaves out take that bodypart's defaults, not BodyPartConfig's.
+    (head, abdomen, left, right) = (
+        _parse_dataclass({**BODY_PART_DEFAULTS[name], **(raw.get(name) or {})}, BodyPartConfig)
+        for name in ("head", "abdomen", "left", "right")
+    )
     aux = _parse_dataclass(raw.get("aux", {}), AuxConfig)
 
     return TrackingConfig(
