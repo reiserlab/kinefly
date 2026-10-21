@@ -182,6 +182,12 @@ class Fly:
         self.bInvertColorValid = False
         self.iCount = 0
         self._last_timestamp: float | None = None
+        self._last_clock: float | None = None
+
+        # The original made this call at startup (via dynamic_reconfigure); without it the
+        # body center is never computed, so auto invert-color never runs.
+        if params:
+            self.set_params(params)
 
     def set_params(self, params):
         self.params = params
@@ -269,16 +275,20 @@ class Fly:
 
     # Calculate what we think the bInvertColor flag should be to make white-on-black.
     def get_invertcolor(self, image):
-        # Get a roi around the body center.
-        xMin = max(0, self.ptBodyCenter_i[0] - int(0.75 * self.rInvertColorArea))
-        yMin = max(0, self.ptBodyCenter_i[1] - int(0.75 * self.rInvertColorArea))
-        xMax = min(
-            self.ptBodyCenter_i[0] + int(0.75 * self.rInvertColorArea),
-            image.shape[1] - 1,
+        # Get a roi around the body center.  (The body center is float; slice indices must be int.)
+        xMin = int(max(0, self.ptBodyCenter_i[0] - int(0.75 * self.rInvertColorArea)))
+        yMin = int(max(0, self.ptBodyCenter_i[1] - int(0.75 * self.rInvertColorArea)))
+        xMax = int(
+            min(
+                self.ptBodyCenter_i[0] + int(0.75 * self.rInvertColorArea),
+                image.shape[1] - 1,
+            )
         )
-        yMax = min(
-            self.ptBodyCenter_i[1] + int(0.75 * self.rInvertColorArea),
-            image.shape[0] - 1,
+        yMax = int(
+            min(
+                self.ptBodyCenter_i[1] + int(0.75 * self.rInvertColorArea),
+                image.shape[0] - 1,
+            )
         )
         imgInvertColorArea = image[yMin:yMax, xMin:xMax]
         self.windowInvertColorArea.set_image(imgInvertColorArea)
