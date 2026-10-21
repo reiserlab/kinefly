@@ -394,7 +394,7 @@ def _tukey_1d(n: int, alpha: float) -> np.ndarray:
     w[right] = 0.5 * (
         1.0 + np.cos(np.pi * (2.0 * k[right] / (alpha * (n - 1)) - 2.0 / alpha + 1.0))
     )
-    return w.astype(np.float32)
+    return w
 
 
 class WindowFunctions:
@@ -409,10 +409,9 @@ class WindowFunctions:
 
     def create_tukey(self, shape: tuple[int, int], feathering: float = 0.25) -> np.ndarray:
         (height, width) = shape
-        alpha = feathering if feathering > 0 else 0.25
-        wfn = np.ones(shape, dtype=np.float32)
-        if height > 1 and width > 1:
-            wy = _tukey_1d(height, alpha)
-            wx = _tukey_1d(width, alpha)
-            wfn = np.outer(wy, wx).astype(np.float32)
-        return wfn
+        alpha = feathering
+        # As in the original: alpha <= 0 is rectangular (no taper), and so is alpha > 1.
+        if (height <= 1) or (width <= 1) or (alpha <= 0.0) or (alpha > 1.0):
+            return np.ones(shape, dtype=np.float32)
+        # Form the product in float64 and round once, as the original loop does.
+        return np.outer(_tukey_1d(height, alpha), _tukey_1d(width, alpha)).astype(np.float32)

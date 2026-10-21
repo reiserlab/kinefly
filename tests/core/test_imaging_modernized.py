@@ -32,28 +32,31 @@ def _ref_create_hanning(shape: tuple[int, int]) -> np.ndarray:
     return wfn
 
 
-def _ref_create_tukey(shape: tuple[int, int], feathering: float = 0.25) -> np.ndarray:
+def _ref_create_tukey(shape: tuple[int, int], alpha: float = 0.25) -> np.ndarray:
+    # From the 2016 code (git show main:nodes/imageprocessing.py, WindowFunctions.create_tukey),
+    # reformatted only.  alpha==0 gives rectangular, alpha=1 gives Hann.
     (height, width) = shape
-    alpha = feathering if feathering > 0 else 0.25
     wfn = np.ones(shape, dtype=np.float32)
-    if height > 1 and width > 1:
+    if (height > 1) and (width > 1):
         for i in range(width):
             for j in range(height):
-                y = np.pi * (2 * j / (alpha * (height - 1)) - 1)
-
-                if 0 <= i <= (alpha * (width - 1)) / 2:
-                    x = np.pi * (2 * i / (alpha * (width - 1)) - 1)
-                elif (alpha * (width - 1)) / 2 < i <= (width - 1) * (1 - alpha / 2):
+                if (alpha <= 0.0) or (alpha > 1.0):
                     x = 0.0
-                elif (width - 1) * (1 - alpha / 2) < i <= width - 1:
-                    x = np.pi * (2 * i / (alpha * (width - 1)) - 2 / alpha + 1)
-
-                if 0 <= j <= (alpha * (height - 1)) / 2:
-                    y = np.pi * (2 * j / (alpha * (height - 1)) - 1)
-                elif (alpha * (height - 1)) / 2 < j <= (height - 1) * (1 - alpha / 2):
                     y = 0.0
-                elif (height - 1) * (1 - alpha / 2) < j <= height - 1:
-                    y = np.pi * (2 * j / (alpha * (height - 1)) - 2 / alpha + 1)
+                else:
+                    if 0 <= i <= (alpha * (width - 1)) / 2:
+                        x = np.pi * (2 * i / (alpha * (width - 1)) - 1)
+                    elif (alpha * (width - 1)) / 2 < i <= (width - 1) * (1 - alpha / 2):
+                        x = 0.0
+                    elif (width - 1) * (1 - alpha / 2) < i <= width - 1:
+                        x = np.pi * (2 * i / (alpha * (width - 1)) - 2 / alpha + 1)
+
+                    if 0 <= j <= (alpha * (height - 1)) / 2:
+                        y = np.pi * (2 * j / (alpha * (height - 1)) - 1)
+                    elif (alpha * (height - 1)) / 2 < j <= (height - 1) * (1 - alpha / 2):
+                        y = 0.0
+                    elif (height - 1) * (1 - alpha / 2) < j <= height - 1:
+                        y = np.pi * (2 * j / (alpha * (height - 1)) - 2 / alpha + 1)
 
                 wfnx = 0.5 * (1 + np.cos(x))
                 wfny = 0.5 * (1 + np.cos(y))
@@ -255,17 +258,18 @@ class TestCreateHanning:
 class TestCreateTukey:
     ALPHAS = [0.1, 0.25, 0.5, 0.75, 1.0]
 
-    @pytest.mark.parametrize("shape", [(32, 32), (16, 48), (64, 64), (2, 2)])
-    @pytest.mark.parametrize("alpha", [0.1, 0.25, 0.5, 0.75])
+    @pytest.mark.parametrize(
+        "shape", [(32, 32), (16, 48), (64, 64), (2, 2), (40, 120), (17, 63), (63, 17)]
+    )
+    @pytest.mark.parametrize("alpha", [0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5])
     def test_matches_reference(self, shape, alpha):
         from kinefly.core.imaging import WindowFunctions
 
         wf = WindowFunctions()
         new = wf.create_tukey(shape, feathering=alpha)
-        ref = _ref_create_tukey(shape, feathering=alpha)
-        np.testing.assert_allclose(
-            new, ref, rtol=1e-5, atol=1e-6,
-            err_msg=f"create_tukey mismatch for shape={shape}, alpha={alpha}",
+        ref = _ref_create_tukey(shape, alpha=alpha)
+        np.testing.assert_array_equal(
+            new, ref, err_msg=f"create_tukey mismatch for shape={shape}, alpha={alpha}"
         )
 
     @pytest.mark.parametrize("shape", [(32, 64), (64, 32)])
@@ -275,14 +279,14 @@ class TestCreateTukey:
         wf = WindowFunctions()
         assert wf.create_tukey(shape).dtype == np.float32
 
-    def test_zero_feathering_uses_default(self):
-        """feathering=0 falls back to alpha=0.25 per original logic."""
+    @pytest.mark.parametrize("feathering", [0.0, -0.5, 1.5])
+    def test_out_of_range_feathering_is_rectangular(self, feathering):
+        """feathering <= 0 or > 1 gives no taper (all ones), as in the original."""
         from kinefly.core.imaging import WindowFunctions
 
         wf = WindowFunctions()
-        w0 = wf.create_tukey((32, 32), feathering=0)
-        w25 = wf.create_tukey((32, 32), feathering=0.25)
-        np.testing.assert_array_equal(w0, w25)
+        w = wf.create_tukey((32, 48), feathering=feathering)
+        np.testing.assert_array_equal(w, np.ones((32, 48), dtype=np.float32))
 
     def test_flat_top_is_one(self):
         """Interior pixels (far from edges) must be exactly 1.0 for alpha < 1."""
