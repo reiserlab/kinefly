@@ -1,0 +1,41 @@
+# Rig config equivalent to the standalone Kinefly's params_walking.yaml (the
+# original 2016 defaults, with n_edges_max: 3).  Every tracker and feathering
+# is set explicitly, because this fork's BodyPartConfig defaults differ.
+kinefly:
+  version: 2
+
+tracking:
+  n_edges_max: 3
+  rc_background: 1000.0
+
+  head:
+    tracker: area
+    autozero: true
+    threshold: 0.0
+    feathering: 0.0
+    saturation_correction: false
+
+  abdomen:
+    tracker: tip
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: false
+
+  left:
+    tracker: edge
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: false
+
+  right:
+    tracker: edge
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: false
+
+  aux:
+    wingbeat_min: 180.0
+    wingbeat_max: 220.0

@@ -40,3 +40,6 @@ select = ["E", "F", "W", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "oracle: exact comparison with the standalone 2016-port Kinefly on real video (~30 s; deselect with -m 'not oracle')",
+]

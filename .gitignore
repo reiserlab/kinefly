@@ -53,6 +53,7 @@ kinefly.png
 
 # Video / image output
 *.mp4
+!tests/oracle/data/*.mp4
 *.avi
 *.mkv
 *.bag
