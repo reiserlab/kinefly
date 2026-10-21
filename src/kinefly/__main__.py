@@ -241,7 +241,9 @@ def _build_fly_params(config, gui_state: dict, img_size: tuple[int, int] = (640,
         params["wingbeat_min"] = aux.wingbeat_min
         params["wingbeat_max"] = aux.wingbeat_max
 
-    return params
+    from kinefly.gui.handle_params import legalize_params
+
+    return legalize_params(params)
 
 
 def main() -> int:

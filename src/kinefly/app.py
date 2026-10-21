@@ -17,6 +17,7 @@ import yaml
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
+from kinefly.gui.handle_params import update_params_from_drag
 from kinefly.gui.window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,10 @@ class KineflyApp:
             return
 
         self._last_frame = frame
-        self._fly.update(frame, timestamp)
+        # As in the original, don't track while a handle is being dragged:  the wedges are
+        # changing, and the area tracker restarts its comparison image on every move.
+        if self._dragging is None:
+            self._fly.update(frame, timestamp)
 
         if self._recorder is not None:
             self._recorder.write_frame(frame)
@@ -187,60 +191,22 @@ class KineflyApp:
         for tracker, name, handle in self._all_handles():
             if handle.hit_test(pt):
                 self._dragging = (tracker, name)
-                handle.pt = pt.astype(int)
                 break
 
     def _on_mouse_moved(self, x: float, y: float) -> None:
         if self._dragging is None:
             return
         tracker, name = self._dragging
-        handle = tracker.handles[name]
-        handle.pt = np.array([x, y], dtype=int)
-        self._write_handle_to_params(tracker, name, x, y)
-        try:
-            tracker.set_params(self._fly.params)
-        except Exception:
-            pass  # params may be incomplete until all handles are placed
-        tracker.bValidMask = False
-
-    def _write_handle_to_params(self, tracker, handle_name: str, x: float, y: float) -> None:
-        """Convert a dragged handle's image position back to the appropriate param value."""
-        params = self._fly.params
-        gui = params.get("gui", {})
-        part = tracker.name
-
-        # Position handles — stored as {"x": int, "y": int}
-        if handle_name in ("hinge", "center", "pt1", "pt2"):
-            _set_nested(params, ["gui", part, handle_name, "x"], int(x))
-            _set_nested(params, ["gui", part, handle_name, "y"], int(y))
-            return
-
-        # Angle handles — stored as a body-frame angle (radians, float)
-        if handle_name in ("angle_hi", "angle_lo"):
-            hinge = gui.get(part, {}).get("hinge", {"x": 0, "y": 0})
-            angle_i = float(np.arctan2(y - hinge["y"], x - hinge["x"]))
-            angle_b = tracker.transform_angle_b_from_i(angle_i)
-            params["gui"][part][handle_name] = float(angle_b)
-            return
-
-        # radius_inner / radius_outer — stored as pixel distance from hinge (float)
-        if handle_name in ("radius_inner", "radius_outer"):
-            hinge = gui.get(part, {}).get("hinge", {"x": 0, "y": 0})
-            params["gui"][part][handle_name] = float(
-                np.linalg.norm([x - hinge["x"], y - hinge["y"]])
-            )
-            return
-
-        # Intensity tracker radii — stored as pixel distance from center (float)
-        if handle_name in ("radius1", "radius2"):
-            center = gui.get(part, {}).get("center", {"x": 0, "y": 0})
-            params["gui"][part][handle_name] = float(
-                np.linalg.norm([x - center["x"], y - center["y"]])
-            )
-            return
+        shape = self._last_frame.shape[:2] if self._last_frame is not None else None
+        name = update_params_from_drag(self._fly, tracker, name, x, y, shape)
+        self._dragging = (tracker, name)  # An angle drag can switch to the other angle handle.
+        # Every tracker, not just this one:  moving the head or abdomen hinge moves the body
+        # axis that all the wedges are measured from.  This also refreshes the handle points.
+        self._fly.set_params(self._fly.params)
 
     def _on_mouse_released(self, x: float, y: float) -> None:
         if self._dragging is not None:
+            self._fly.set_params(self._fly.params)
             self._save_gui_state()
         self._dragging = None
 
