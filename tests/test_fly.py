@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from kinefly.core.types import FlyState
 from kinefly.fly import Fly
@@ -56,3 +57,35 @@ def test_fly_auto_invert_color():
     fly.update(255 - bright_body, timestamp=0.0)
     assert fly.bInvertColorValid
     assert fly.bInvertColor is True
+
+
+def _dts(monkeypatch, stamps, clocks):
+    """The dt the trackers get for frames with these camera stamps, at these clock times."""
+    import kinefly.fly
+
+    clock = iter(clocks)
+    monkeypatch.setattr(kinefly.fly.time, "perf_counter", lambda: next(clock))
+    fly = Fly(params={})
+    dts = []
+    fly.head.update = lambda dt, image, bInvertColor: dts.append(dt)
+    img = np.zeros((10, 10), dtype=np.uint8)
+    for stamp in stamps:
+        fly.update(img, timestamp=stamp)
+    return dts
+
+
+def test_dt_from_camera_stamps(monkeypatch):
+    assert _dts(monkeypatch, [1.0, 1.01, 1.03], [5.0, 5.5, 6.0]) == pytest.approx(
+        [np.inf, 0.01, 0.02]
+    )
+
+
+def test_dt_falls_back_to_clock(monkeypatch):
+    """If the camera stamp doesn't advance, dt comes from our own clock, as in the original."""
+    assert _dts(monkeypatch, [1.0, 1.0, 0.5], [5.0, 5.25, 5.75]) == pytest.approx(
+        [np.inf, 0.25, 0.5]
+    )
+
+
+def test_dt_when_nothing_advances(monkeypatch):
+    assert _dts(monkeypatch, [1.0, 1.0], [5.0, 5.0]) == pytest.approx([np.inf, 1.0])

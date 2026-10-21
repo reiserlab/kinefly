@@ -6,6 +6,7 @@ Ported from nodes/fly.py. Replaces ROS publisher with EventBus.emit(FlyState).
 from __future__ import annotations
 
 import logging
+import time
 
 import cv2
 import numpy as np
@@ -327,15 +328,25 @@ class Fly:
                     self.bInvertColor = self.get_invertcolor(image)
                     self.bInvertColorValid = True
 
-            # Compute dt.
+            # Get the dt.  Keep track of both the camera timestamp and our own clock, and use
+            # our own clock only if the camera timestamp isn't advancing (as the original did).
+            # The FlyState keeps the camera's timestamp.
+            clock = time.perf_counter()
             if self._last_timestamp is not None:
                 dt = max(0.0, timestamp - self._last_timestamp)
+
+                # If the camera is not giving good timestamps, then use our own clock.
                 if dt == 0.0:
-                    dt = 1.0 / 60.0  # Assume 60fps if timestamps aren't advancing
+                    dt = max(0.0, clock - self._last_clock)
+
+                # If that didn't advance either, then just assume a value.
+                if dt == 0.0:
+                    dt = 1.0
             else:
                 dt = np.inf
 
             self._last_timestamp = timestamp
+            self._last_clock = clock
 
             self.head.update(dt, image, self.bInvertColor)
             self.abdomen.update(dt, image, self.bInvertColor)
