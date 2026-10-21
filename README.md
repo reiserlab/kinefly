@@ -114,6 +114,7 @@ The **head** and **abdomen** use the same hinge + wedge geometry. The **aux** re
 | Control | Action |
 |---|---|
 | **Track H/A/L/R/X** | Enable tracking for head / abdomen / left wing / right wing / aux |
+| **Start / Pause** | Kinefly opens paused on the first frame, so the handles can be placed; click **Start** to track (`--no-pause` starts right away). While paused nothing is tracked, and a video holds its frame. |
 | **Record** | Start/stop MP4 recording to `~/kinefly_recordings/` |
 | **Save BG** | Capture the current frame as the background for subtraction, and save it to `~/kinefly.png` (`gui.background_file`), which is loaded at the next startup |
 | **Exit** | Save state and quit |

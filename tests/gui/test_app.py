@@ -50,6 +50,7 @@ def app(tmp_path):
         plugins=[],
         state_file=str(tmp_path / "kinefly.yaml"),
         background_file=str(tmp_path / "bg" / "kinefly.png"),
+        start_paused=False,
     )
 
 
@@ -166,3 +167,72 @@ def test_symmetric_toggle_is_saved_and_used(app):
     assert fly.params["gui"]["right"]["hinge"]["x"] == pytest.approx(600.0 - left["x"])
     assert fly.params["gui"]["right"]["hinge"]["y"] == pytest.approx(left["y"])
     assert fly.params["gui"]["right"]["hinge"]["x"] != pytest.approx(right["x"])
+
+
+def test_starts_paused_on_first_video_frame(tmp_path, app):
+    """By default the app opens paused:  a video holds its first frame, untracked."""
+    from kinefly.app import KineflyApp
+    from kinefly.camera.videofile import VideoFileSource
+
+    class _FakeVideo(VideoFileSource):
+        def __init__(self):
+            self.n = 0
+
+        def read(self):
+            self.n += 1
+            return np.full(SHAPE, self.n, dtype=np.uint8), self.n / 100.0
+
+        def close(self):
+            pass
+
+    video = _FakeVideo()
+    paused = KineflyApp(
+        app._config,
+        video,
+        app._fly,
+        app._bus,
+        plugins=[],
+        state_file=str(tmp_path / "paused.yaml"),
+        background_file=str(tmp_path / "paused.png"),
+    )
+    assert paused._window._btn_pause.isChecked()
+    for _ in range(3):
+        paused._process_frame()
+    assert video.n == 1  # Holding the first frame.
+    assert app._fly.iCount == 0  # Not tracked.
+
+    paused._window._btn_pause.setChecked(False)  # "Start"
+    paused._process_frame()
+    paused._process_frame()
+    assert video.n == 3
+    assert app._fly.iCount == 2
+
+
+def test_live_camera_keeps_reading_while_paused(app):
+    app._on_pause_toggled(True)
+    t0 = app._camera.t
+    app._process_frame()
+    app._process_frame()
+    assert app._camera.t > t0  # New frames are shown...
+    assert app._fly.iCount == 0  # ...but not tracked.
+
+
+def test_tracking_error_keeps_showing_frames(app, monkeypatch, caplog):
+    """A tracking error is logged once, and the video keeps playing so it can be fixed."""
+
+    def fail(frame, timestamp):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(app._fly, "update", fail)
+    shown = []
+    monkeypatch.setattr(app._window, "update_image", shown.append)
+    with caplog.at_level("ERROR"):
+        for _ in range(3):
+            app._process_frame()
+    assert len(shown) == 3
+    assert sum("Tracking failed" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_track_labels_are_distinct(app):
+    labels = [cb.text() for cb in app._window._track_checks.values()]
+    assert labels == ["Track H", "Track A", "Track L", "Track R", "Track X"]

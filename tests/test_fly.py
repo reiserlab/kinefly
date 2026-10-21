@@ -113,3 +113,34 @@ def test_emitted_flystate_is_a_snapshot():
     assert states[0] == first
     for part in ("head", "abdomen", "left", "right", "aux"):
         assert getattr(states[0], part) is not getattr(fly, part).state
+
+
+@pytest.mark.parametrize("tracker", ["tip", "area", "edge"])
+def test_wedge_off_image_edge(tracker, caplog):
+    """A thin wedge running off the image edge doesn't break tracking (the frame is skipped).
+
+    Regression:  more of the wedge cut off than its width made rClip negative, and
+    the polar transform failed on every frame.
+    """
+    from kinefly.__main__ import _build_fly_params, _default_gui_state
+    from kinefly.config.loader import _parse_config
+
+    # The abdomen wedge from a real session:  the default (thin) wedge, with the hinge
+    # moved down until the wedge runs off the bottom of a 1440x1080 image.
+    (w, h) = (1440, 1080)
+    config = _parse_config({"tracking": {"abdomen": {"tracker": tracker}}})
+    params = _build_fly_params(config, _default_gui_state(w, h), (w, h))
+    g = params["gui"]["abdomen"]
+    g["hinge"] = {"x": 713.7752161383286, "y": 856.1228406909789}
+    (g["radius_inner"], g["radius_outer"], g["track"]) = (225.0, 270.0, True)
+    params["gui"]["head"]["track"] = True
+    fly = Fly(params=params)
+
+    rng = np.random.default_rng(0)
+    with caplog.at_level("WARNING"):
+        for i in range(3):
+            fly.update(rng.integers(0, 255, (h, w), dtype=np.uint8), timestamp=i * 0.01)
+            fly.draw(np.zeros((h, w, 3), dtype=np.uint8))
+    assert 0.0 <= fly.abdomen.rClip <= 1.0
+    assert sum("no points transformed" in r.getMessage() for r in caplog.records) == 1
+    assert fly.head.state.angles  # The other bodyparts are still tracked.

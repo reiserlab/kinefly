@@ -531,6 +531,7 @@ class MotionTrackedBodypartPolar(MotionTrackedBodypart):
         self.imgRoiFgMaskedPolarCroppedWindowed = None
         self.imgFinal = None  # The image to use for tracking.
         self.imgHeadroomPolar = None
+        self.bNoPolarPoints = False  # The wedge has no pixels in the image (warned once).
 
         self.windowPolar = ImageWindow(False, self.name + "Polar")
 
@@ -590,7 +591,10 @@ class MotionTrackedBodypartPolar(MotionTrackedBodypart):
             if roiClipped[3] > 0:  # Bottom
                 rClip3 = 1.0 - (float(roiClipped[3]) / float(r_outer - r_inner))
 
-            self.rClip = np.min([rClip0, rClip1, rClip2, rClip3])
+            # A fraction in [0, 1]:  it goes negative when the image edge cuts off more than
+            # the wedge's width, e.g. a thin wedge near the edge.  (The original's loop over
+            # range(ceil(rClip*nRho)) then just ran zero times; numpy needs the clamp.)
+            self.rClip = float(np.clip(np.min([rClip0, rClip1, rClip2, rClip3]), 0.0, 1.0))
 
         # End create_mask()
 
@@ -621,7 +625,19 @@ class MotionTrackedBodypartPolar(MotionTrackedBodypart):
                     amplifyTheta=1.0,
                 )
             except imaging.TransformException:
-                logger.warning("%s: Mask is outside the image, no points transformed.", self.name)
+                # Nothing of the wedge to track, e.g. it runs off the image edge.  Skip this
+                # frame (the trackers keep their last state) instead of failing on no image.
+                if not self.bNoPolarPoints:
+                    logger.warning(
+                        "%s: Mask is outside the image, no points transformed.", self.name
+                    )
+                self.bNoPolarPoints = True
+                self.imgRoiFgMaskedPolar = None
+                self.imgRoiFgMaskedPolarCropped = None
+                self.imgRoiFgMaskedPolarCroppedWindowed = None
+                self.windowPolar.set_image(None)
+                return
+            self.bNoPolarPoints = False
 
             # Find the y value where the black band should be cropped out.
             sumY = np.sum(self.imgRoiFgMaskedPolar, 1)

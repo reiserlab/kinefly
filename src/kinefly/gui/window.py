@@ -36,6 +36,8 @@ class MainWindow(QMainWindow):
         Emitted when the Stabilize checkbox is toggled.
     symmetric_toggled(enabled)
         Emitted when the Symmetric checkbox is toggled.
+    pause_toggled(paused)
+        Emitted when the Pause button is toggled.
     record_toggled(recording)
         Emitted when the Record button is toggled.
     save_background_clicked
@@ -54,11 +56,14 @@ class MainWindow(QMainWindow):
     windows_toggled = Signal(bool)
     stabilize_toggled = Signal(bool)
     symmetric_toggled = Signal(bool)
+    pause_toggled = Signal(bool)
     record_toggled = Signal(bool)
     save_background_clicked = Signal()
     exit_clicked = Signal()
 
     _BODY_PARTS = ("head", "abdomen", "left", "right", "aux")
+    # Checkbox labels, as in the original:  X for aux, since A is the abdomen.
+    _PART_LABELS = {"head": "H", "abdomen": "A", "left": "L", "right": "R", "aux": "X"}
     # Background subtraction has one checkbox for both wings, as in the original.
     _SUBTRACT_BG_GROUPS = {"head": "H", "abdomen": "A", "lr": "LR", "aux": "X"}
 
@@ -82,13 +87,23 @@ class MainWindow(QMainWindow):
         # Track checkboxes — one per body part
         self._track_checks: dict[str, QCheckBox] = {}
         for part in self._BODY_PARTS:
-            cb = QCheckBox(f"Track {part[0].upper()}")
+            cb = QCheckBox(f"Track {self._PART_LABELS[part]}")
             cb.setChecked(False)
             cb.toggled.connect(lambda checked, p=part: self.track_toggled.emit(p, checked))
             toolbar1.addWidget(cb)
             self._track_checks[part] = cb
 
         toolbar1.addSeparator()
+
+        # Pause button (toggle):  no tracking while paused; a video holds its frame.
+        self._btn_pause = QPushButton("Pause")
+        self._btn_pause.setCheckable(True)
+        self._btn_pause.setToolTip(
+            "Pause tracking.  A video stays on its current frame, so the handles\n"
+            "can be placed; a live camera keeps showing new frames."
+        )
+        self._btn_pause.toggled.connect(self._on_pause_toggled)
+        toolbar1.addWidget(self._btn_pause)
 
         # Record button (toggle)
         self._btn_record = QPushButton("Record")
@@ -181,6 +196,8 @@ class MainWindow(QMainWindow):
         self._rec_label = QLabel("")
         self._status_bar.addWidget(self._fps_label)
         self._status_bar.addWidget(self._rec_label)
+        self._pause_label = QLabel("")
+        self._status_bar.addWidget(self._pause_label)
 
         self.resize(800, 600)
 
@@ -239,9 +256,24 @@ class MainWindow(QMainWindow):
         self._cb_symmetric.setChecked(enabled)
         self._cb_symmetric.blockSignals(False)
 
+    def set_paused_state(self, paused: bool) -> None:
+        """Programmatically set the Pause button without triggering the signal."""
+        self._btn_pause.blockSignals(True)
+        self._btn_pause.setChecked(paused)
+        self._btn_pause.blockSignals(False)
+        self._show_paused(paused)
+
+    def _show_paused(self, paused: bool) -> None:
+        self._btn_pause.setText("Start" if paused else "Pause")
+        self._pause_label.setText("PAUSED: place the handles, then click Start" if paused else "")
+
     # ------------------------------------------------------------------
     # Private slots
     # ------------------------------------------------------------------
+
+    def _on_pause_toggled(self, checked: bool) -> None:
+        self._show_paused(checked)
+        self.pause_toggled.emit(checked)
 
     def _on_record_toggled(self, checked: bool) -> None:
         self._btn_record.setText("Stop" if checked else "Record")

@@ -35,6 +35,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Run without GUI (headless frame loop, no window)",
     )
     parser.add_argument(
+        "--no-pause",
+        action="store_true",
+        default=False,
+        help="Start tracking immediately, instead of paused on the first frame (GUI only)",
+    )
+    parser.add_argument(
         "--record",
         action="store_true",
         help="Enable video recording",
@@ -354,6 +360,7 @@ def main() -> int:
             state_file=config.gui.state_file,
             background_file=config.gui.background_file,
             have_background=have_background,
+            start_paused=not args.no_pause,
         )
         return app.run()
 

@@ -68,6 +68,7 @@ class KineflyApp:
         state_file: str = "~/kinefly.yaml",
         background_file: str = "~/kinefly.png",
         have_background: bool = False,
+        start_paused: bool = True,
     ) -> None:
         self._config = config
         self._camera = camera
@@ -79,6 +80,14 @@ class KineflyApp:
         self._background_file = Path(background_file).expanduser()
         self._have_background = have_background  # The fly has a background image.
         self._last_frame: np.ndarray | None = None
+
+        # Paused:  no tracking, and a video file holds its current frame.
+        from kinefly.camera.videofile import VideoFileSource
+
+        self._paused = start_paused
+        self._is_video_file = isinstance(camera, VideoFileSource)
+        self._tracking_failed = False  # Logged once, until tracking works again.
+        self._drawing_failed = False
 
         self._qapp = QApplication.instance() or QApplication([])
         self._window = MainWindow()
@@ -102,6 +111,7 @@ class KineflyApp:
         self._window.record_toggled.connect(self._on_record_toggled)
         self._window.save_background_clicked.connect(self._on_save_background)
         self._window.exit_clicked.connect(self._on_exit)
+        self._window.pause_toggled.connect(self._on_pause_toggled)
 
         # Sync checkboxes to current fly params
         gui = fly.params.get("gui", {})
@@ -112,6 +122,7 @@ class KineflyApp:
         self._window.set_windows_state(bool(gui.get("windows", False)))
         self._window.set_stabilize_state(bool(gui.get("head", {}).get("stabilize", False)))
         self._window.set_symmetric_state(bool(gui.get("symmetric", False)))
+        self._window.set_paused_state(self._paused)
 
         # Frame timer
         self._timer = QTimer()
@@ -139,33 +150,54 @@ class KineflyApp:
 
     def _process_frame(self) -> None:
         """Read one frame, update the fly, draw overlays, refresh the window."""
-        try:
-            frame, timestamp = self._camera.read()
-        except StopIteration:
-            logger.info("End of video source.")
-            self._timer.stop()
-            self._qapp.quit()
-            return
-        except Exception:
-            logger.exception("Camera read error")
-            self._timer.stop()
-            self._qapp.quit()
-            return
+        # Paused on a video file:  hold the current frame (so handles can be placed on it),
+        # and keep redrawing it.  A live camera keeps showing new frames while paused.
+        hold = self._paused and self._is_video_file and (self._last_frame is not None)
+        if hold:
+            (frame, timestamp) = (self._last_frame, None)  # Not tracked while paused.
+        else:
+            try:
+                frame, timestamp = self._camera.read()
+            except StopIteration:
+                logger.info("End of video source.")
+                self._timer.stop()
+                self._qapp.quit()
+                return
+            except Exception:
+                logger.exception("Camera read error")
+                self._timer.stop()
+                self._qapp.quit()
+                return
+            self._last_frame = frame
 
-        self._last_frame = frame
         # As in the original, don't track while a handle is being dragged:  the wedges are
         # changing, and the area tracker restarts its comparison image on every move.
-        if self._dragging is None:
-            self._fly.update(frame, timestamp)
+        if (not self._paused) and (self._dragging is None):
+            try:
+                self._fly.update(frame, timestamp)
+            except Exception:
+                # Keep showing the video, so the handles can be fixed.  Log it once.
+                if not self._tracking_failed:
+                    logger.exception("Tracking failed; check the handle positions.")
+                self._tracking_failed = True
+            else:
+                self._tracking_failed = False
 
-        if self._recorder is not None:
+        if (self._recorder is not None) and not hold:
             self._recorder.write_frame(frame)
 
         # Build display image: BGR → draw overlays → RGB → Qt
         display = frame.copy()
         if display.ndim == 2:
             display = cv2.cvtColor(display, cv2.COLOR_GRAY2BGR)
-        self._fly.draw(display)
+        try:
+            self._fly.draw(display)
+        except Exception:
+            if not self._drawing_failed:
+                logger.exception("Drawing the overlays failed.")
+            self._drawing_failed = True
+        else:
+            self._drawing_failed = False
         rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
         self._window.update_image(rgb)
 
@@ -264,6 +296,10 @@ class KineflyApp:
             _set_nested(self._fly.params, ["gui", part, "stabilize"], enabled)
         self._fly.set_params(self._fly.params)  # Shows or hides the stabilized windows.
         self._save_gui_state()
+
+    def _on_pause_toggled(self, paused: bool) -> None:
+        self._paused = paused
+        logger.info("Paused." if paused else "Tracking.")
 
     def _on_symmetric_toggled(self, enabled: bool) -> None:
         if not self._fly.params:
