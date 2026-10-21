@@ -362,24 +362,33 @@ class Fly:
                 self._event_bus.emit(flystate)
 
     def get_flystate(self) -> FlyState:
-        """Aggregate tracker states into a FlyState dataclass."""
-        params = self.params
-        gui = params.get("gui", {})
+        """Aggregate tracker states into a FlyState dataclass.
 
-        head = self.head.state if gui.get("head", {}).get("track") else BodyPartState()
-        abdomen = self.abdomen.state if gui.get("abdomen", {}).get("track") else BodyPartState()
-        left = self.left.state if gui.get("left", {}).get("track") else BodyPartState()
-        right = self.right.state if gui.get("right", {}).get("track") else BodyPartState()
-        aux = self.aux.state if gui.get("aux", {}).get("track") else BodyPartState()
+        The body part states are copies, so consumers that hold on to a FlyState (ZeroMQ,
+        ROS publishers, other threads) never see the trackers' later updates.
+        """
+        gui = self.params.get("gui", {})
+
+        def state(tracker) -> BodyPartState:
+            if not gui.get(tracker.name, {}).get("track"):
+                return BodyPartState()
+            s = tracker.state
+            return BodyPartState(
+                angles=list(s.angles),
+                gradients=list(s.gradients),
+                radii=list(s.radii),
+                freq=s.freq,
+                intensity=s.intensity,
+            )
 
         return FlyState(
             timestamp=self._last_timestamp if self._last_timestamp is not None else 0.0,
             seq=self.iCount,
-            head=head,
-            abdomen=abdomen,
-            left=left,
-            right=right,
-            aux=aux,
+            head=state(self.head),
+            abdomen=state(self.abdomen),
+            left=state(self.left),
+            right=state(self.right),
+            aux=state(self.aux),
         )
 
     def draw(self, image):

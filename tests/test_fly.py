@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 import pytest
 
@@ -89,3 +91,25 @@ def test_dt_falls_back_to_clock(monkeypatch):
 
 def test_dt_when_nothing_advances(monkeypatch):
     assert _dts(monkeypatch, [1.0, 1.0], [5.0, 5.0]) == pytest.approx([np.inf, 1.0])
+
+
+def test_emitted_flystate_is_a_snapshot():
+    """A FlyState someone holds on to doesn't change when the next frame is tracked."""
+    from kinefly.core.events import EventBus
+
+    params = _full_params()
+    for part in ("head", "abdomen", "left", "right", "aux"):
+        params["gui"][part]["track"] = True
+    states = []
+    bus = EventBus()
+    bus.register(states.append)
+    fly = Fly(params=params, event_bus=bus)
+
+    fly.update(np.full((480, 640), 50, dtype=np.uint8), timestamp=0.0)
+    first = copy.deepcopy(states[0])
+    fly.update(np.full((480, 640), 200, dtype=np.uint8), timestamp=0.01)
+
+    assert states[1].aux.intensity != first.aux.intensity
+    assert states[0] == first
+    for part in ("head", "abdomen", "left", "right", "aux"):
+        assert getattr(states[0], part) is not getattr(fly, part).state
